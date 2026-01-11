@@ -1,118 +1,89 @@
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
-local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local RootPart = Character:WaitForChild("HumanoidRootPart")
+local plr = Players.LocalPlayer
+local char = plr.Character or plr.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
 
--- Update character reference
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    Character = newChar
-    Humanoid = Character:WaitForChild("Humanoid")
-    RootPart = Character:WaitForChild("HumanoidRootPart")
+-- Update on respawn
+plr.CharacterAdded:Connect(function(new)
+    char = new
+    hrp = new:WaitForChild("HumanoidRootPart")
 end)
 
--- Config
-local Config = {
-    Speed = 200,  -- High speed for fast TP and collection
-    CollectDistance = 50,  -- Distance to detect brainrots
-    BasePosition = nil  -- Will auto-detect base
-}
+-- Configuración
+local SPEED = 250             -- Velocidad alta
+local COLLECT_DISTANCE = 60   -- Distancia para detectar
+local BASE_POS = Vector3.new(0, 50, 0)  -- Cambia esto si sabes las coords de tu base
 
--- Find base position (assume bases are in Workspace.Bases or player bases)
-local function findBase()
-    -- Common base folder names in such games: "Bases", "Plots", "PlayerBases"
-    for _, folder in pairs(Workspace:GetChildren()) do
-        if folder.Name:lower():find("base") or folder.Name:lower():find("plot") then
-            local myBase = folder:FindFirstChild(LocalPlayer.Name)
-            if myBase then
-                Config.BasePosition = myBase.PrimaryPart or myBase:FindFirstChild("Spawn") or myBase:FindFirstChildOfClass("Part")
-                if Config.BasePosition then
-                    Config.BasePosition = Config.BasePosition.Position
-                    return true
+-- Intento de detectar base automáticamente (puede fallar, ajusta manual)
+local function tryFindBase()
+    for _, v in pairs(Workspace:GetChildren()) do
+        if v.Name:lower():find("base") or v.Name:lower():find("plot") then
+            local myBase = v:FindFirstChild(plr.Name)
+            if myBase and myBase:IsA("Model") then
+                local part = myBase.PrimaryPart or myBase:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    BASE_POS = part.Position + Vector3.new(0, 10, 0)
+                    print("[Lynox Hub] Base detectada en: " .. tostring(BASE_POS))
+                    return
                 end
             end
         end
     end
-    -- Fallback: assume safe zone at Vector3(0, 50, 0) or find highest safe platform
-    Config.BasePosition = Vector3.new(0, 50, 0)
-    return false
+    print("[Lynox Hub] No se detectó base → usando posición por defecto (0,50,0)")
 end
 
-findBase()
+tryFindBase()
 
--- High speed for mobility
-Humanoid.WalkSpeed = Config.Speed
-
--- Teleport function with tween for smoothness (anti-detection)
-local function tweenTo(position, duration)
-    duration = duration or 0.5
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(RootPart, tweenInfo, {CFrame = CFrame.new(position)})
-    tween:Play()
-    tween.Completed:Wait()
+-- Velocidad alta
+if char:FindFirstChild("Humanoid") then
+    char.Humanoid.WalkSpeed = SPEED
 end
 
--- Collect brainrot function
-local function collectBrainrot(brainrot)
-    if brainrot and brainrot.Parent then
-        local pos = brainrot.Position
-        tweenTo(pos)
-        wait(0.1)  -- Touch delay
-        firetouchinterest(RootPart, brainrot, 0)  -- Touch start
-        wait()
-        firetouchinterest(RootPart, brainrot, 1)  -- Touch end
-        print("Lynox Hub: Collected Celestial Brainrot!")
+-- Función simple de teletransporte (sin Tween para mejor compatibilidad en Xeno)
+local function tpTo(pos)
+    if hrp then
+        hrp.CFrame = CFrame.new(pos)
     end
 end
 
--- Main loop: Scan for Celestial Brainrots
-local function scanBrainrots()
+-- Recolectar brainrot (touch simulation simple)
+local function collect(part)
+    if not part or not part.Parent then return end
+    
+    print("[Lynox Hub] Celestial detectado → recolectando...")
+    tpTo(part.Position + Vector3.new(0, 3, 0))
+    wait(0.15)
+    
+    -- Simular touch (funciona en la mayoría de executors level 7+ como Xeno)
+    firetouchinterest(hrp, part, 0)
+    wait()
+    firetouchinterest(hrp, part, 1)
+    
+    wait(0.4)
+    print("[Lynox Hub] Recolectado! Volviendo a base...")
+    tpTo(BASE_POS)
+end
+
+-- Scanner principal (cada frame)
+RunService.Heartbeat:Connect(function()
     for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("Part") or obj:IsA("MeshPart") then
-            -- Detect Celestial: Check name patterns or attributes (common: "Celestial", rarity value, glow effect)
+        if obj:IsA("BasePart") or obj:IsA("MeshPart") then
             local name = obj.Name:lower()
-            local hasCelestial = name:find("celestial") or name:find("god") or name:find("secret") or 
-                                 (obj:FindFirstChild("Rarity") and obj.Rarity.Value == "Celestial") or
-                                 obj.Material == Enum.Material.Neon  -- Glowy rare ones
-
-            if hasCelestial and (RootPart.Position - obj.Position).Magnitude < Config.CollectDistance then
-                print("Lynox Hub: Celestial Brainrot detected! Collecting...")
-                collectBrainrot(obj)
-                
-                -- Goto Base after pickup
-                if Config.BasePosition then
-                    print("Lynox Hub: Returning to base...")
-                    tweenTo(Config.BasePosition + Vector3.new(0, 10, 0))
-                end
-                break  -- One at a time
+            local dist = (hrp.Position - obj.Position).Magnitude
+            
+            -- Detección de Celestial (ajusta según necesites)
+            local isCelestial = name:find("celestial") or name:find("god") or name:find("secret") or
+                                name:find("legendary") or obj.Material == Enum.Material.Neon or
+                                (obj:FindFirstChild("Rarity") and obj.Rarity.Value:lower():find("celestial"))
+            
+            if isCelestial and dist < COLLECT_DISTANCE then
+                collect(obj)
+                break  -- Solo uno a la vez para evitar spam
             end
         end
-    end
-end
-
--- Run scanner every frame
-RunService.Heartbeat:Connect(scanBrainrots)
-
--- Re-find base periodically
-spawn(function()
-    while true do
-        wait(30)
-        findBase()
-    end
-end)
-
-print("🧠 TikTok Lynox Hub Loaded! Auto Celestial Collector + Auto Base Return Active 🏃‍♂️🌊")
-print("Game: https://www.roblox.com/es/games/131623223084840/Escape-Tsunami-For-Brainrots")
-print("Toggle: Manually disable by setting Humanoid.WalkSpeed = 16")
-
--- Anti-detection: Randomize speed slightly
-spawn(function()
-    while true do
-        wait(math.random(5, 15))
-        Humanoid.WalkSpeed = Config.Speed + math.random(-10, 10)
     end
 end)
